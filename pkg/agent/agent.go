@@ -47,11 +47,6 @@ import (
 	"open-cluster-management.io/work/pkg/spoke/controllers/statuscontroller"
 )
 
-const (
-	availableControllerWorker = 10
-	cleanupControllerWorker   = 10
-)
-
 //go:embed crds
 var crds embed.FS
 
@@ -82,6 +77,11 @@ type AgentOptions struct {
 	KubeConfig  string
 	WorkAgentID string
 
+	AvailableControllerWorker int
+	CleanupControllerWorker   int
+
+	DisableWork bool
+
 	eventRecorder events.Recorder
 }
 
@@ -91,6 +91,8 @@ func NewAgentOptions() *AgentOptions {
 		eventRecorder:                          util.NewLoggingRecorder("managed-cluster-agents"),
 		Burst:                                  100,
 		QPS:                                    50,
+		AvailableControllerWorker:              10,
+		CleanupControllerWorker:                10,
 		StatusSyncInterval:                     10 * time.Second,
 		AppliedManifestWorkEvictionGracePeriod: 10 * time.Minute,
 	}
@@ -209,6 +211,10 @@ func (o *AgentOptions) RunAgent(ctx context.Context) error {
 	kubeconfigPath := path.Join(o.RegistrationAgent.HubKubeconfigDir, clientcert.KubeconfigFile)
 	if err := o.WaitForValidHubKubeConfig(ctx, kubeconfigPath); err != nil {
 		klog.Fatalf("failed to wait hub kubeconfig, %v", err)
+	}
+
+	if o.DisableWork {
+		klog.Infof("Work agent is disable")
 	}
 
 	hubRestConfig, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
@@ -422,12 +428,12 @@ func (o *AgentOptions) startWorkControllers(ctx context.Context,
 	go spokeWorkInformerFactory.Start(ctx.Done())
 
 	go addFinalizerController.Run(ctx, 1)
-	go appliedManifestWorkFinalizeController.Run(ctx, cleanupControllerWorker)
+	go appliedManifestWorkFinalizeController.Run(ctx, o.CleanupControllerWorker)
 	go unmanagedAppliedManifestWorkController.Run(ctx, 1)
 	go appliedManifestWorkController.Run(ctx, 1)
 	go manifestWorkController.Run(ctx, 1)
-	go manifestWorkFinalizeController.Run(ctx, cleanupControllerWorker)
-	go availableStatusController.Run(ctx, availableControllerWorker)
+	go manifestWorkFinalizeController.Run(ctx, o.CleanupControllerWorker)
+	go availableStatusController.Run(ctx, o.AvailableControllerWorker)
 
 	return nil
 }
