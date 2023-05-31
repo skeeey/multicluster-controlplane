@@ -213,18 +213,17 @@ func (o *AgentOptions) RunAgent(ctx context.Context) error {
 		klog.Fatalf("failed to wait hub kubeconfig, %v", err)
 	}
 
-	if o.DisableWork {
-		klog.Infof("Work agent is disable")
-	}
+	if !o.DisableWork {
+		klog.Infof("Starting work agent")
 
-	hubRestConfig, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
-	if err != nil {
-		return err
-	}
+		hubRestConfig, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+		if err != nil {
+			return err
+		}
 
-	klog.Infof("Starting work agent")
-	if err := o.startWorkControllers(ctx, hubRestConfig, spokeKubeConfig, o.eventRecorder); err != nil {
-		klog.Fatalf("failed to run work agent, %v", err)
+		if err := o.startWorkControllers(ctx, hubRestConfig, spokeKubeConfig, o.eventRecorder); err != nil {
+			klog.Fatalf("failed to run work agent, %v", err)
+		}
 	}
 
 	<-ctx.Done()
