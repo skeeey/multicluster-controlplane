@@ -214,38 +214,49 @@ func (o *clusterCreateOptions) getCurrentClusterCount(ctx context.Context) (int,
 }
 
 func (o *clusterCreateOptions) createClusterNamespace(ctx context.Context, name string) error {
-	_, err := o.hubKubeClient.CoreV1().Namespaces().Create(
-		ctx,
-		&corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: name,
-				Labels: map[string]string{
-					performanceTestLabel: "true",
+	return wait.PollUntilContextTimeout(ctx, 1*time.Second, o.Timeout, true, func(ctx context.Context) (bool, error) {
+		if _, err := o.hubKubeClient.CoreV1().Namespaces().Create(
+			ctx,
+			&corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: name,
+					Labels: map[string]string{
+						performanceTestLabel: "true",
+					},
 				},
 			},
-		},
-		metav1.CreateOptions{},
-	)
-	return err
+			metav1.CreateOptions{},
+		); err != nil {
+			return false, nil
+		}
+
+		return true, nil
+	})
+
 }
 
 func (o *clusterCreateOptions) createCluster(ctx context.Context, name string) error {
-	_, err := o.hubClusterClient.ClusterV1().ManagedClusters().Create(
-		ctx,
-		&clusterv1.ManagedCluster{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: name,
-				Labels: map[string]string{
-					performanceTestLabel: "true",
+	return wait.PollUntilContextTimeout(ctx, 1*time.Second, o.Timeout, true, func(ctx context.Context) (bool, error) {
+		if _, err := o.hubClusterClient.ClusterV1().ManagedClusters().Create(
+			ctx,
+			&clusterv1.ManagedCluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: name,
+					Labels: map[string]string{
+						performanceTestLabel: "true",
+					},
+				},
+				Spec: clusterv1.ManagedClusterSpec{
+					HubAcceptsClient: true,
 				},
 			},
-			Spec: clusterv1.ManagedClusterSpec{
-				HubAcceptsClient: true,
-			},
-		},
-		metav1.CreateOptions{},
-	)
-	return err
+			metav1.CreateOptions{},
+		); err != nil {
+			return false, nil
+		}
+
+		return true, nil
+	})
 }
 
 func (o *clusterCreateOptions) registerCluster(ctx context.Context, clusterName string) error {
@@ -276,19 +287,18 @@ func (o *clusterCreateOptions) registerCluster(ctx context.Context, clusterName 
 }
 
 func (o *clusterCreateOptions) waitClusterAvailable(ctx context.Context, clusterName string) error {
-	return wait.PollUntilContextTimeout(ctx, 1*time.Second, o.Timeout, true,
-		func(ctx context.Context) (bool, error) {
-			cluster, err := o.hubClusterClient.ClusterV1().ManagedClusters().Get(ctx, clusterName, metav1.GetOptions{})
-			if err != nil {
-				return false, nil
-			}
-
-			if meta.IsStatusConditionTrue(cluster.Status.Conditions, clusterv1.ManagedClusterConditionAvailable) {
-				return true, nil
-			}
-
+	return wait.PollUntilContextTimeout(ctx, 1*time.Second, o.Timeout, true, func(ctx context.Context) (bool, error) {
+		cluster, err := o.hubClusterClient.ClusterV1().ManagedClusters().Get(ctx, clusterName, metav1.GetOptions{})
+		if err != nil {
 			return false, nil
-		})
+		}
+
+		if meta.IsStatusConditionTrue(cluster.Status.Conditions, clusterv1.ManagedClusterConditionAvailable) {
+			return true, nil
+		}
+
+		return false, nil
+	})
 }
 
 func (o *clusterCreateOptions) createWorks(ctx context.Context, clusterName string) error {
@@ -301,8 +311,14 @@ func (o *clusterCreateOptions) createWorks(ctx context.Context, clusterName stri
 	}
 	for index, work := range works {
 		startTime := time.Now()
-		_, err := o.hubWorkClient.WorkV1().ManifestWorks(work.Namespace).Create(ctx, work, metav1.CreateOptions{})
-		if err != nil {
+		if err := wait.PollUntilContextTimeout(ctx, 1*time.Second, o.Timeout, true, func(ctx context.Context) (bool, error) {
+			_, err := o.hubWorkClient.WorkV1().ManifestWorks(work.Namespace).Create(ctx, work, metav1.CreateOptions{})
+			if err != nil {
+				return false, nil
+			}
+
+			return true, nil
+		}); err != nil {
 			return err
 		}
 		// milli second
