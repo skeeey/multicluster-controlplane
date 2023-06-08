@@ -11,9 +11,7 @@ import (
 
 	"github.com/spf13/pflag"
 
-	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
@@ -269,11 +267,6 @@ func (o *clusterCreateOptions) registerCluster(ctx context.Context, clusterName 
 		}
 	}()
 
-	utils.PrintMsg(fmt.Sprintf("approving the cluster %q ...", clusterName))
-	if err := o.approveCSR(ctx, clusterName); err != nil {
-		return err
-	}
-
 	utils.PrintMsg(fmt.Sprintf("waiting the cluster %q becomes available ...", clusterName))
 	if err := o.waitClusterAvailable(ctx, clusterName); err != nil {
 		return err
@@ -282,50 +275,12 @@ func (o *clusterCreateOptions) registerCluster(ctx context.Context, clusterName 
 	return nil
 }
 
-func (o *clusterCreateOptions) approveCSR(ctx context.Context, clusterName string) error {
-	return wait.PollUntilContextTimeout(context.TODO(), 1*time.Second, 60*time.Second, true,
-		func(ctx context.Context) (bool, error) {
-			csrs, err := o.hubKubeClient.CertificatesV1().CertificateSigningRequests().List(ctx, metav1.ListOptions{
-				LabelSelector: fmt.Sprintf("open-cluster-management.io/cluster-name=%s", clusterName),
-			})
-			if err != nil {
-				return false, err
-			}
-
-			if len(csrs.Items) == 0 {
-				return false, nil
-			}
-
-			for _, csr := range csrs.Items {
-				if isCSRInTerminalState(&csr.Status) {
-					continue
-				}
-
-				copied := csr.DeepCopy()
-				copied.Status.Conditions = append(csr.Status.Conditions, certificatesv1.CertificateSigningRequestCondition{
-					Type:           certificatesv1.CertificateApproved,
-					Status:         corev1.ConditionTrue,
-					Reason:         "AutoApprovedByE2ETest",
-					Message:        "Auto approved by e2e test",
-					LastUpdateTime: metav1.Now(),
-				})
-				_, err := o.hubKubeClient.CertificatesV1().CertificateSigningRequests().UpdateApproval(
-					ctx, copied.Name, copied, metav1.UpdateOptions{})
-				if err != nil {
-					return false, err
-				}
-			}
-
-			return true, nil
-		})
-}
-
 func (o *clusterCreateOptions) waitClusterAvailable(ctx context.Context, clusterName string) error {
-	return wait.PollUntilContextTimeout(context.TODO(), 1*time.Second, o.Timeout, true,
+	return wait.PollUntilContextTimeout(ctx, 1*time.Second, o.Timeout, true,
 		func(ctx context.Context) (bool, error) {
 			cluster, err := o.hubClusterClient.ClusterV1().ManagedClusters().Get(ctx, clusterName, metav1.GetOptions{})
 			if err != nil {
-				return false, err
+				return false, nil
 			}
 
 			if meta.IsStatusConditionTrue(cluster.Status.Conditions, clusterv1.ManagedClusterConditionAvailable) {
@@ -355,14 +310,11 @@ func (o *clusterCreateOptions) createWorks(ctx context.Context, clusterName stri
 
 		waitStartTime := time.Now()
 		var appliedTime time.Duration
-		if err := wait.PollUntilContextTimeout(context.TODO(), 1*time.Second, o.Timeout, true,
+		if err := wait.PollUntilContextTimeout(ctx, 1*time.Second, o.Timeout, true,
 			func(ctx context.Context) (bool, error) {
 				work, err := o.hubWorkClient.WorkV1().ManifestWorks(work.Namespace).Get(ctx, work.Name, metav1.GetOptions{})
-				if errors.IsNotFound(err) {
-					return false, nil
-				}
 				if err != nil {
-					return false, err
+					return false, nil
 				}
 
 				if meta.IsStatusConditionTrue(work.Status.Conditions, workv1.WorkApplied) {
@@ -394,16 +346,4 @@ func (o *clusterCreateOptions) createWorks(ctx context.Context, clusterName stri
 
 func getClusterName(prefix string, index int) string {
 	return fmt.Sprintf("%s-%d", prefix, index)
-}
-
-func isCSRInTerminalState(status *certificatesv1.CertificateSigningRequestStatus) bool {
-	for _, c := range status.Conditions {
-		if c.Type == certificatesv1.CertificateApproved {
-			return true
-		}
-		if c.Type == certificatesv1.CertificateDenied {
-			return true
-		}
-	}
-	return false
 }

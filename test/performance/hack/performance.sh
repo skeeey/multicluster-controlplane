@@ -22,11 +22,11 @@ rm -f $REPO_DIR/hack/deploy/controlplane/ocmconfig.yaml
 kubectl delete ns multicluster-controlplane --ignore-not-found --wait
 kubectl create ns multicluster-controlplane
 
-helm install charts/multicluster-controlplane \
+helm install multicluster-controlplane charts/multicluster-controlplane \
     -n multicluster-controlplane \
     --set route.enabled=true \
-    --set enableSelfManagement=false \
-    --generate-name
+    --set autoApprovalBootstrapUsers=system:admin \
+    --set enableSelfManagement=false
 
 # wait for multicluster-controlplane ready
 wait_command "kubectl -n multicluster-controlplane get secrets multicluster-controlplane-kubeconfig"
